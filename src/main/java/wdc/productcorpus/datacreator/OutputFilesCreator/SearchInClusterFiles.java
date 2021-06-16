@@ -9,7 +9,7 @@ import java.util.Map;
 
 import org.json.JSONObject;
 
-import wdc.productcorpus.datacreator.Extractor.IdentifierExtractor;
+import wdc.productcorpus.datacreator.Extractor.EnhancedIdentifierExtractor;
 import wdc.productcorpus.util.InputUtil;
 
 public class SearchInClusterFiles {
@@ -34,7 +34,7 @@ public class SearchInClusterFiles {
 		String line;
 		while ((line = br.readLine()) != null) {
 			String rawValue = line.split("\\|\\|")[0].trim();
-			String normalizedValue = IdentifierExtractor.normalizeValue(rawValue);
+			String normalizedValue = EnhancedIdentifierExtractor.normalizeValue(rawValue);
 			normalizedIDValues.add(normalizedValue);
 			productstoIDs.put(rawValue, line.split("\\|\\|")[2]);
 		}

@@ -59,6 +59,8 @@ public class IDPropsProfiler extends Processor<File> {
 		idprops_values.put("/identifier", new HashSet<String>());
 		idprops_values.put("/productID", new HashSet<String>());
 		idprops_values.put("/mpn", new HashSet<String>());
+		idprops_values.put("/gtin", new HashSet<String>());
+		idprops_values.put("/serialNumber", new HashSet<String>());
 	}
 	
 	@Override
@@ -80,8 +82,6 @@ public class IDPropsProfiler extends Processor<File> {
 	@Override
 	protected void process(File object) throws Exception {
 		
-		
-		
 		HashMap<String, HashSet<String>> localMap = new HashMap<String,HashSet<String>>();
 		localMap.put("/gtin8", new HashSet<String>());
 		localMap.put("/gtin12", new HashSet<String>());
@@ -91,6 +91,8 @@ public class IDPropsProfiler extends Processor<File> {
 		localMap.put("/identifier", new HashSet<String>());
 		localMap.put("/productID", new HashSet<String>());
 		localMap.put("/mpn", new HashSet<String>());
+		localMap.put("/gtin", new HashSet<String>());
+		localMap.put("/serialNumber", new HashSet<String>());
 		
 		BufferedReader br = InputUtil.getBufferedReader(object);
 		

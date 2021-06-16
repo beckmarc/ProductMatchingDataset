@@ -1,4 +1,4 @@
-package wdc.productcorpus.datacreator.Filter;
+package wdc.productcorpus.v2.datacreator.filter;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -9,26 +9,26 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 
-import org.json.JSONObject;
-
 import de.dwslab.dwslib.framework.Processor;
 import wdc.productcorpus.util.DomainUtil;
 import wdc.productcorpus.util.InputUtil;
+import wdc.productcorpus.v2.model.Entity;
+import wdc.productcorpus.v2.model.EntityStatic;
+import wdc.productcorpus.v2.util.CustomFileWriter;
 
-public class BadPLDsFilter extends Processor<File>{
-	
-	
+public class DeleteEntities extends Processor<File>{
 	
 	private File outputDirectory; 
 	private File inputDirectory;
 	private Integer threads;
 	
-	public BadPLDsFilter(File output, File input, Integer threads, HashSet<String> badplds) {
+	public DeleteEntities(File output, File input, Integer threads, HashSet<String> badplds) {
 		this.outputDirectory = output;
 		this.inputDirectory = input;
 		this.threads = threads;
 		this.badplds = badplds;
 	}
+	
 	HashSet<String> badplds = new HashSet<String>();
 	
 	long eliminatedLines = (long)0.0;
@@ -51,32 +51,32 @@ public class BadPLDsFilter extends Processor<File>{
 
 	@Override
 	protected void process(File object) throws Exception {
-		
 		BufferedReader br = InputUtil.getBufferedReader(object);
+		String fileName = CustomFileWriter.removeExt(object.getName());
 		
-		ArrayList<String> filteredData = new ArrayList<String>();
+		ArrayList<Entity> filteredData = new ArrayList<Entity>();
 		String line;
 		long eliminatedLines =(long) 0.0;
 
 		while ((line = br.readLine()) != null) {
 			
-			JSONObject json = new JSONObject(line);
-			String url = json.getString("url"); 
-			String domain = DomainUtil.getPayLevelDomainFromWholeURL(url);
-		
-//			String []lineParts= line.split("\\t");
-//			String domain = DomainUtil.getPayLevelDomainFromWholeURL(lineParts[2]);
+			Entity e = EntityStatic.parseEntity(line);
+			String domain = DomainUtil.getPayLevelDomainFromWholeURL(e.url);
+			
 			if (null != domain && badplds.contains(domain)) eliminatedLines++;
-			else filteredData.add(line);
+			else filteredData.add(e);
+			
+			if (filteredData.size()>10000) {
+				
+				CustomFileWriter.writeEntitiesToFile(fileName, outputDirectory, "filterPld", filteredData);
+				filteredData.clear();
+			}
 		}
 		
-		if (filteredData.size()>100000) {
-			writeInFile(object.getName(), filteredData);
-			filteredData.clear();
-		}
+		
 		
 		//write the last part
-		writeInFile(object.getName(), filteredData);
+		CustomFileWriter.writeEntitiesToFile(fileName, outputDirectory, "filterPld", filteredData);
 		filteredData.clear();
 		integrateElimLines(eliminatedLines);
 	}
@@ -86,17 +86,6 @@ public class BadPLDsFilter extends Processor<File>{
 		
 	}
 
-	private void writeInFile(String fileName, ArrayList<String> data) throws IOException {
-		
-		BufferedWriter writer = new BufferedWriter (new FileWriter(outputDirectory.toString()+"/"+fileName+"_filteredbadplds.txt",true));
-		
-		for (String line:data)
-			writer.write(line+"\n");
-		
-		writer.flush();
-		writer.close();
-		
-	}
 	
 	@Override
 	protected void afterProcess() {

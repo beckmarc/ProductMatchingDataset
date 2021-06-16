@@ -19,11 +19,12 @@ import de.dwslab.dwslib.util.io.InputUtil;
 import wdc.productcorpus.util.DomainUtil;
 import wdc.productcorpus.util.Histogram;
 import wdc.productcorpus.util.SortMap;
+import wdc.productcorpus.v2.model.Entity;
+import wdc.productcorpus.v2.model.EntityStatic;
 
 /**
  * @author Anna Primpeli
  *  Profiling of the offers corpus. The corpus has to have the following structure:
- *  filename \t nodeID \t url \t identifyingproperty \t identifyingpropertyvalue \t textualcontent
  */
 public class IDInfoProfiler extends Processor<File> {
 
@@ -84,34 +85,35 @@ public class IDInfoProfiler extends Processor<File> {
 			try {
 				line = br.readLine();
 				lineCount++;
-				String [] lineParts =line.split("\\t");
-								
-				//countValues
-				String value = lineParts[4];
-				Integer currentvaluecount = valuesCount.get(value);
-				if (null == currentvaluecount) currentvaluecount=0;
-				valuesCount.put(value, ++currentvaluecount);
+				Entity e = EntityStatic.parseEntity(line);
 				
 				//count pld
-				String domain = DomainUtil.getPayLevelDomainFromWholeURL(lineParts[2]);
+				String domain = DomainUtil.getPayLevelDomainFromWholeURL(e.url);
 				Integer currentpldcount = pldCount.get(domain);
 				if (null == currentpldcount) currentpldcount=0;
 				pldCount.put(domain, ++currentpldcount);
 				
-				//count property
-				String property = lineParts[3];
-				Integer currentpropertycount = propertyCount.get(property);
-				if (null == currentpropertycount) currentpropertycount=0;
-				propertyCount.put(property, ++currentpropertycount);
-				
-				//count unique plds per value
-				HashSet<String> currentpldsforValue = values_distinctPLDs.get(value);
-				if (null == currentpldsforValue) currentpldsforValue = new HashSet<String>();
-				currentpldsforValue.add(domain);
-				values_distinctPLDs.put(value, currentpldsforValue);
+				// for each identifier on an entity
+				for( Map.Entry<String, String> entry : EntityStatic.getMappedIdentifiers(e).entrySet()) {
+					//countValues
+					Integer currentvaluecount = valuesCount.get(entry.getValue());
+					if (null == currentvaluecount) currentvaluecount=0;
+					valuesCount.put(entry.getValue(), ++currentvaluecount);
+					
+					//count property
+					Integer currentpropertycount = propertyCount.get(entry.getKey());
+					if (null == currentpropertycount) currentpropertycount=0;
+					propertyCount.put(entry.getKey(), ++currentpropertycount);
+					
+					//count unique plds per value
+					HashSet<String> currentpldsforValue = values_distinctPLDs.get(entry.getValue());
+					if (null == currentpldsforValue) currentpldsforValue = new HashSet<String>();
+					currentpldsforValue.add(domain);
+					values_distinctPLDs.put(entry.getValue(), currentpldsforValue);
+				}	
 				
 				//count unique elements with identifiers
-				uniqueSupervisedProducts.add(lineParts[1].concat(lineParts[2]));
+				uniqueSupervisedProducts.add(e.url + e.nodeId);
 				
 
 			}
@@ -121,7 +123,7 @@ public class IDInfoProfiler extends Processor<File> {
 				continue;
 			}
 		}
-		
+		 
 		integrateValues(valuesCount);
 		integratePLDs(pldCount);
 		integrateProperties(propertyCount);

@@ -8,6 +8,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import scala.reflect.generic.Trees.This;
+import wdc.productcorpus.v2.util.PrintUtils;
+
 public class Histogram<T> {
 
 	LinkedHashMap <String, Integer> distr = new LinkedHashMap <String, Integer>();
@@ -72,8 +75,21 @@ public class Histogram<T> {
 		
 		writer.write("Histogram "+this.hTitle+"\n" );
 		
-		for (Map.Entry<String, Integer> h:this.distr.entrySet()) {
-			writer.write(h.getKey()+" : "+h.getValue()+"\n");
+		//PrintUtils.p(this.distr);
+		
+		String key = "";
+		Integer value = 0;
+		boolean first = true;
+		for (Map.Entry<String, Integer> h:this.distr.entrySet()) {		
+			if(first) {
+				key = h.getKey();
+				first = false;
+			} else {
+				value = h.getValue();
+				writer.write(key+" : "+value+"\n");
+				key = h.getKey();
+			}
+			
 		}
 		
 		writer.flush();

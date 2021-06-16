@@ -7,7 +7,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -18,13 +17,11 @@ import com.beust.jcommander.Parameters;
 import com.beust.jcommander.converters.FileConverter;
 
 import de.dwslab.dwslib.framework.Processor;
-import de.uni_mannheim.informatik.dws.winter.utils.graph.Edge;
 import ldif.local.datasources.dump.QuadFileLoader;
 import ldif.runtime.Quad;
 import scala.actors.threadpool.Arrays;
 import wdc.productcorpus.util.InputUtil;
 import wdc.productcorpus.v2.model.Entity;
-import wdc.productcorpus.v2.model.EntityStatic;
 import wdc.productcorpus.v2.util.CustomFileWriter;
 import wdc.productcorpus.v2.util.PrintUtils;
 import wdc.productcorpus.v2.util.QuadParser;
@@ -35,7 +32,7 @@ import wdc.productcorpus.v2.util.StringUtils;
  *
  */
 @Parameters(commandDescription = "")
-public class IdentifierExtractor extends Processor<File> {
+public class IdentifierExtractor2 extends Processor<File> {
 
 	@Parameter(names = { "-out",
 			"-outputDir" }, required = true, description = "Folder where the outputfile(s) are written to.", converter = FileConverter.class)
@@ -64,15 +61,7 @@ public class IdentifierExtractor extends Processor<File> {
 	    add("/name");
 	    add("/title");
 	    add("/description");
-	    add("/price");
-	    add("/priceCurrency");
-	    add("/image");
-	    add("/availability");
-	    add("/manufacturer");
-	}};
-	
-	ArrayList<String> parentChildProperties = new ArrayList<String>() {{
-	    add("/offers");
+
 	}};
 	
 	/*
@@ -113,22 +102,28 @@ public class IdentifierExtractor extends Processor<File> {
 
 	private long errorCount = 0;
 	private long parsedLines = 0;
-	private long noDesc = 0;
-	private long desc = 0;
 
 	@Override
 	protected void process(File object) throws Exception {
+
+//		OrderVerifier verify = new OrderVerifier();
+//		if (!verify.isOrderedBySubjectID(object.getPath())) {
+//			System.out.println("File "+object.getPath()+ " is not ordered. Process will end.");
+//			System.exit(0);
+//		}
 				
+//		System.out.println("File ordered: "+object.getName());
 		long lineCount = (long)0.0;
 		int errorCount = 0;
 
+		QuadFileLoader qfl = new QuadFileLoader();
 		QuadParser qp = new QuadParser(true);
-		String currentId = "";
+		String currentID = "";
 		List<Quad> quads = new ArrayList<Quad>();
 		// read the file
 		BufferedReader br = InputUtil.getBufferedReader(object);
 		
-		ArrayList<Entity> nodesWithSupervision = new ArrayList<Entity>();
+		ArrayList<SupervisedNode> nodesWithSupervision = new ArrayList<SupervisedNode>();
 		
 		int nodesWithSupervisionCount = 0;
 		Quad eq = null;
@@ -140,34 +135,33 @@ public class IdentifierExtractor extends Processor<File> {
 				//Quad q = qfl.parseQuadLine(br.readLine());
 				currentLine = br.readLine();
 				Quad q = qp.parseQuadLine(currentLine);
+				eq = q;
 				lineCount++;
 				
 				if(lineCount % 1000000 == 0) {
 					System.out.println("Parsed "+lineCount+" from file:"+object.getName());
 				}
 				
-				if (q.subject().value().equals(currentId)) {
+				if (q.subject().toString().equals(currentID)) {
 					quads.add(q);
 				} else {
 					if (quads.size() > 0) {
-						Entity entity = parseEntity(quads, object.getName());
-						if(entity != null) {
-							nodesWithSupervision.add(entity);
-						}
+						PrintUtils.p(quads.size());
+						nodesWithSupervision.addAll(filterQuadsOfSubject(quads, object.getName()));
 						
 						//write once in a while in file so that we don't keep everything in memory
 						if (nodesWithSupervision.size()>100000) {
-							CustomFileWriter.writeEntitiesToFile(object.getName(), outputDirectory, "extract", nodesWithSupervision);
+							CustomFileWriter.writeNodesToFile(object.getName(), outputDirectory, "extract", nodesWithSupervision);
 							nodesWithSupervisionCount += nodesWithSupervision.size();
 							nodesWithSupervision.clear();
 						}
 					}
 					quads.clear();
 					quads.add(q);
-					currentId = q.subject().value();
+					currentID = q.subject().toString();
 				}
 			} catch (Exception e) {
-				e.printStackTrace();
+//				e.printStackTrace();
 //				System.out.println(currentLine);
 //				System.out.println(eq);
 				errorLines.add(currentLine);
@@ -176,70 +170,98 @@ public class IdentifierExtractor extends Processor<File> {
 		}
 		// process once more for the last quads
 		if (quads.size() > 0) {
-			Entity entity = parseEntity(quads, object.getName());
-			if(entity != null) {
-				nodesWithSupervision.add(entity);
-			}
+			nodesWithSupervision.addAll(filterQuadsOfSubject(quads, object.getName()));
 		}
 		br.close();
 		nodesWithSupervisionCount += nodesWithSupervision.size();
 
-		System.out.println("Entities with supervision: "+nodesWithSupervisionCount+" in file:"+object.getName());
+		System.out.println("Nodes with supervision: "+nodesWithSupervisionCount+" in file:"+object.getName());
 		updateErrorCount(errorCount);
 		updateLineCount(lineCount);
 		String fileName = CustomFileWriter.removeExt(object.getName());
-		CustomFileWriter.writeEntitiesToFile(fileName, outputDirectory, "extract", nodesWithSupervision);
+		CustomFileWriter.writeNodesToFile(fileName, outputDirectory, "extract", nodesWithSupervision);
 		// writeErrorsInFile("errors.txt", errorLines);
 	}
 
-	private Entity parseEntity(List<Quad> quads, String fileName) {	
-		Entity entity = new Entity();
-		entity.hasId = false;
+	
+	private ArrayList<SupervisedNode> filterQuadsOfSubject(List<Quad> quads, String fileName) {
 		
-		for (Quad q: quads){ 
+		ArrayList<SupervisedNode> nodesWithIDs = new ArrayList<SupervisedNode>();
+		
+		HashMap<String, List<Quad>> quadsPerEntity = new HashMap<String, List<Quad>>();
+		
+		//in order to identify the entity we need the url and the subject id
+		for (Quad q:quads) {
+			String id = q.subject().toString()+"_"+q.graph();
 			
-			for (String id:identifiers){
-				if (q.predicate().contains(id) && !q.value().value().trim().equals("")) {
-					entity.hasId = true;
-					EntityStatic.setIdentifyingProperty(entity, id, q.value().value());			
+			List<Quad> existingQuads = quadsPerEntity.get(id);
+			if (null == existingQuads) existingQuads = new ArrayList<Quad>();
+			existingQuads.add(q);
+			quadsPerEntity.put(id, existingQuads);
+		}
+		
+		PrintUtils.p("size:" +quadsPerEntity.keySet().size());
+		
+		
+		for (Map.Entry<String, List<Quad>> q:quadsPerEntity.entrySet()){
+			boolean hasID = false;
+			
+			String nodeid="";
+			String url="";
+			HashMap<String,String> textPerProp = new HashMap<String,String>();
+			HashMap<String, String> idProperty_Value = new HashMap<String,String>();
+			
+			// Textual Properties
+			String title="";
+			String name="";
+			String description="";
+			String brand="";
+			
+			for (Quad equad:q.getValue()) {
+				
+				nodeid = equad.subject().toString();
+				url = equad.graph();
+				
+				for (String id:identifiers){			
+					if (equad.predicate().contains(id)) {
+						hasID = true;
+						idProperty_Value.put(id, normalizeValue(equad.value().toString()));						
+					}
+				}
+				
+				for (String textProp:textualProperties) {
+					//get the text of literal of object of the predicates we have defined			
+					if (equad.predicate().toString().contains(textProp) && equad.value().toString().startsWith("\"") ) {
+						switch(textProp) {
+							case "/title":
+								title = equad.value().value().toString();
+							break;
+							case "/name":
+								name = equad.value().value().toString();
+							break;
+							case "/description":
+								description = equad.value().value().toString();
+							break;
+							case "/brand":
+								brand = equad.value().value().toString();
+							break;
+						}
+					}
 				}
 			}
 			
-			for (String textProp:textualProperties) {
-				//get the text of literal of object of the predicates we have defined			
-				if (q.predicate().contains(textProp) && q.value().toString().startsWith("\"") ) {			
-					EntityStatic.setTextualProperty(entity, textProp, normalizeText(q.value().value()));	
+			//if we found an interesting entity store it
+			if (hasID) {
+				for (Map.Entry<String, String> idV:idProperty_Value.entrySet()) {
+					nodesWithIDs.add(new SupervisedNode(nodeid, url, fileName, idV.getKey(), idV.getValue(),
+							"\""+name+"\"", "\""+title+"\"", "\""+brand+"\"", "\""+description+"\""));
 				}
 			}
-			
 		}
-		
-		//if we found an interesting entity store it
-		if(entity.hasId) {		
-			entity.fileId = fileName;
-			entity.url = quads.get(0).graph(); // all quads have the same graph label
-			entity.nodeId = quads.get(0).subject().toString();
-			return entity;
-		}
-		else {
-			return null;
-		}
+		return nodesWithIDs;
 	}
-	
-	/**
-	 * Normalizes textual properties. Returns null if the string is empty after the process.
-	 * @param text
-	 * @return
-	 */
-	public String normalizeText(String text) {
-		String normalizedText = text.replaceAll("(\\s{2,})|(\\\\n)|(\\\\r)|(\\\\t)", ""); 
-		normalizedText = normalizedText.replaceAll("\u00A0", "").trim();
-		if(normalizedText.equals("")) {
-			return null;
-		}
-		return normalizedText;
-	}
-	
+
+
 	public static String normalizeValue(String rawValue) {
 		String normalizedValue = rawValue.toLowerCase();
 		return normalizedValue;
@@ -254,16 +276,6 @@ public class IdentifierExtractor extends Processor<File> {
 	private synchronized void updateLineCount(long lineCount) {
 		this.parsedLines += lineCount;
 	}
-	
-	// sync line count with global line count
-	private synchronized void updateNoDescCount(long lineCount) {
-		this.noDesc  += lineCount;
-	}
-	
-	// sync line count with global line count
-	private synchronized void updateDescCount(long lineCount) {
-		this.desc  += lineCount;
-	}
 
 	
 
@@ -272,8 +284,6 @@ public class IdentifierExtractor extends Processor<File> {
 		try {
 			System.out.println("Parsed " + parsedLines + " lines.");
 			System.out.println("Could not parse " + errorCount + " lines (quads).");
-			System.out.println("Found entities with no textual description: " + noDesc);
-			System.out.println("Amount of entities where text was added: " + desc);
 
 		} catch (Exception e) {
 			e.printStackTrace();

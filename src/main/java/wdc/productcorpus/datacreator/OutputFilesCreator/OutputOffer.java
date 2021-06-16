@@ -26,7 +26,6 @@ public class OutputOffer {
 	private String parentNodeID;
 	private HashMap<String, HashSet<String>> nonprocessedIdentifiers = new HashMap<String, HashSet<String>>();
 	
-	private SpecificationTable specTable;
 	
 	//private String specTableContent;
 	

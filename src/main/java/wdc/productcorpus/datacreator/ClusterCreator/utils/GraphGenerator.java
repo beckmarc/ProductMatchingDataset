@@ -8,6 +8,7 @@ import java.util.HashSet;
 
 import de.uni_mannheim.informatik.dws.winter.utils.graph.Edge;
 import de.uni_mannheim.informatik.dws.winter.utils.graph.Node;
+import wdc.productcorpus.v2.util.PrintUtils;
 
 public class GraphGenerator {
 
@@ -24,6 +25,7 @@ public class GraphGenerator {
 			
 			
 			System.out.println("Create nodes");
+			System.out.println(identifiers.size());
 	
 			//create a vertex for every unique identifier
 			for (int i=0; i<identifiers.size();i++) {
@@ -38,7 +40,16 @@ public class GraphGenerator {
 			for (Offer offer:offers) {
 				for (String id:offer.getUniqueIdentifiers()) {
 					//add the offer info in the corresponding vertex of the graph
-					nodesOfGraph.get(id).getData().getOffers().add(offer);
+					
+//					if(nodesOfGraph.get(id) != null) {
+						nodesOfGraph.get(id).getData().getOffers().add(offer);
+//					} else {
+//						PrintUtils.p(id);
+//						PrintUtils.p(nodesOfGraph.get(id));
+//						PrintUtils.p(offer.toString());
+//						PrintUtils.p(offer.getPropValue());
+//					}
+					
 			
 					for (String id_:offer.getUniqueIdentifiers()) {
 						//create an edge between all the identifier values (as vertices) of the same offer

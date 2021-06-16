@@ -34,6 +34,8 @@ import wdc.productcorpus.datacreator.ClusterCreator.utils.ProductClass;
 import wdc.productcorpus.datacreator.OutputFilesCreator.OutputCluster;
 import wdc.productcorpus.util.Histogram;
 import wdc.productcorpus.util.InputUtil;
+import wdc.productcorpus.v2.model.Entity;
+import wdc.productcorpus.v2.model.EntityStatic;
 
 public class GraphCreator extends Processor<File>{
 
@@ -49,7 +51,7 @@ public class GraphCreator extends Processor<File>{
 	private Integer threads;
 	
 	@Parameter(names = "-clean", description = "Indicate if the graph should be cleaned from vertices with small Clustering Coefficient.")
-	private Boolean cleanSmallCC = false;
+	private boolean cleanSmallCC = true;
 	
 	@Parameter(names = "-filterOffersCount", description = "Indicate if the graph should be filtered from components with less than 10 offers.")
 	private Boolean filterOffersCount = false;
@@ -97,6 +99,7 @@ public class GraphCreator extends Processor<File>{
 		}
 		return is;
 	}
+	
 	@Override
 	protected void process(File object){
 		HashMap<String, ArrayList<String>> tempEntities = new HashMap<String, ArrayList<String>>();
@@ -108,20 +111,22 @@ public class GraphCreator extends Processor<File>{
 			String line="";
 
 			while ((line = br.readLine()) != null) {
-				String [] lineParts =line.split("\\t");
-				String key = lineParts[1]+"\t"+lineParts[2];
-				String idProp = lineParts[3];
-				String idValue = lineParts[4];
+				Entity e = EntityStatic.parseEntity(line);
+				String key = e.nodeId + "\t" + e.url;
 				
-				ArrayList<String> currentValues = tempEntities.get(key);
-				if (null == currentValues) currentValues = new ArrayList<String>();
-				currentValues.add(idProp+"||"+idValue);
+				ArrayList<String> currentValues = new ArrayList<String>();
+				
+				for(Map.Entry<String,String> id : EntityStatic.getMappedIdentifiers(e).entrySet()) {
+					String idProp = id.getKey();
+					String idValue = id.getValue();
+					
+					currentValues.add(idProp+"||"+idValue);	
+					tempIdentifiers.add(idValue);
+					
+				}
 				tempEntities.put(key, currentValues);
 				
-				tempIdentifiers.add(idValue);
-					
 			}
-			
 			br.close();
 		}
 		catch (Exception e){
@@ -178,7 +183,7 @@ public class GraphCreator extends Processor<File>{
 	
 		}
 		catch(Exception e){
-			System.out.println(e.getMessage());
+			e.printStackTrace();
 		}
 	}
 
@@ -302,6 +307,11 @@ public class GraphCreator extends Processor<File>{
 		
 	}
 	
+	/**
+	 * Creates clusters.json file
+	 * @param components
+	 * @throws IOException
+	 */
 	private void writeClustersInfo(HashSet<Component> components) throws IOException {
 		BufferedWriter writer  = new BufferedWriter(new FileWriter(outputDirectory.getPath()+"/clusters.json"));
 
@@ -329,6 +339,11 @@ public class GraphCreator extends Processor<File>{
 	}
 	
 	
+	/**
+	 * Creates offer.json file
+	 * @param components
+	 * @throws IOException
+	 */
 	private void writeOffersToClusterID(HashSet<Component> components) throws IOException {
 		
 		BufferedWriter writer  = new BufferedWriter(new FileWriter(outputDirectory.getPath()+"/offers.json"));

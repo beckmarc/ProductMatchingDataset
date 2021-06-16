@@ -12,6 +12,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.beust.jcommander.Parameter;
+import com.beust.jcommander.converters.FileConverter;
+
 import de.dwslab.dwslib.framework.Processor;
 import wdc.productcorpus.datacreator.OutputFilesCreator.DataImporter;
 import wdc.productcorpus.datacreator.OutputFilesCreator.OutputOffer;
@@ -24,16 +27,28 @@ import wdc.productcorpus.util.StDevStats;
  */
 public class DetectListingsAds extends Processor<ArrayList<OutputOffer>>{
 	
-	private File offersFile = new File("C:\\Users\\User\\workspace\\TransferLearningDataCreator\\src\\main\\resources\\tmp\\offers");
+	@Parameter(names = { "-offerFile" }, required = true, description = "Offers File", converter = FileConverter.class)
+	private File offersFile;
+
+	@Parameter(names = "-outputClean", required = true, description = "Clean output")
+	private File outputClean;
+	
+	@Parameter(names = "-outputListings", required = true, description = "")
+	private File outputListings;
+	
+	@Parameter(names = "-threads", required = true, description = "Number of threads.")
+	private Integer threads;
+	
 	private int maxOffersPerUrl = 3;
 	private double maxStdDevForListingPages = 0.2;
-	private File outputClean = new File("C:\\Users\\User\\workspace\\TransferLearningDataCreator\\src\\main\\resources\\tmp\\offers_clean.txt");
-	private File outputListings = new File("C:\\Users\\User\\workspace\\TransferLearningDataCreator\\src\\main\\resources\\tmp\\offers_listings");
-	private int threads = 1;
 	
 	private HashSet<OutputOffer> listingsorAddsOffers = new HashSet<OutputOffer>();
 	private HashSet<OutputOffer> globalCleanOffers = new HashSet<OutputOffer>();
 	private HashSet<OutputOffer> offers = new HashSet<OutputOffer>();
+	
+//	private File offersFile = new File("C:\\Users\\User\\workspace\\TransferLearningDataCreator\\src\\main\\resources\\tmp\\offers");
+//	private File outputClean = new File("C:\\Users\\User\\workspace\\TransferLearningDataCreator\\src\\main\\resources\\tmp\\offers_clean.txt");
+//	private File outputListings = new File("C:\\Users\\User\\workspace\\TransferLearningDataCreator\\src\\main\\resources\\tmp\\offers_listings");
 	
 	
 	@Override
@@ -63,7 +78,8 @@ public class DetectListingsAds extends Processor<ArrayList<OutputOffer>>{
 			else {
 				//even if we dont have lots of offers per url we should ignore the similar or relate offers
 				for (OutputOffer o:offersOfURL.getValue()) {
-					if (o.getPropertyToParent().toLowerCase().contains("isrelatedto")||o.getPropertyToParent().toLowerCase().contains("issimilarto")) this.listingsorAddsOffers.add(o);
+					if (o.getPropertyToParent().toLowerCase().contains("isrelatedto")||o.getPropertyToParent().toLowerCase().contains("issimilarto"))
+						this.listingsorAddsOffers.add(o);
 					this.globalCleanOffers.add(o);
 				}
 				
@@ -73,7 +89,7 @@ public class DetectListingsAds extends Processor<ArrayList<OutputOffer>>{
 		System.out.printf("Urls with more than %d offers : %d \n", maxOffersPerUrl, offersByListingUls.size());
 		
 		// we dont need that big object anymore
-		offersByURL.clear();		
+		offersByURL.clear();
 		
 		for (Map.Entry<String, List<OutputOffer>> urlWOffers : offersByListingUls.entrySet()) {
 			outputOffersPerURL.add((ArrayList<OutputOffer>) urlWOffers.getValue());

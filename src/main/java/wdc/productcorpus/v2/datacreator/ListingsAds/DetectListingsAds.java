@@ -1,249 +1,291 @@
 package wdc.productcorpus.v2.datacreator.ListingsAds;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLDecoder;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.apache.commons.httpclient.URI;
+import org.apache.http.client.utils.URLEncodedUtils;
+
+import com.beust.jcommander.Parameter;
+import com.beust.jcommander.converters.FileConverter;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.net.InternetDomainName;
+
 import de.dwslab.dwslib.framework.Processor;
+import info.debatty.java.stringsimilarity.NormalizedLevenshtein;
+import wdc.productcorpus.datacreator.Extractor.SupervisedNode;
 import wdc.productcorpus.datacreator.OutputFilesCreator.DataImporter;
 import wdc.productcorpus.datacreator.OutputFilesCreator.OutputOffer;
+import wdc.productcorpus.util.DomainUtil;
+import wdc.productcorpus.util.InputUtil;
 import wdc.productcorpus.util.StDevStats;
+import wdc.productcorpus.v2.datacreator.filter.PLDFilterDetect;
+import wdc.productcorpus.v2.model.Entity;
+import wdc.productcorpus.v2.model.EntityStatic;
+import wdc.productcorpus.v2.datacreator.filter.DeleteEntities;
+import wdc.productcorpus.v2.util.CustomFileWriter;
+import wdc.productcorpus.v2.util.PrintUtils;
+import wdc.productcorpus.v2.util.StringUtils;
 
 /**
  * @author Anna Primpeli
  * Detect listing pages and ads by considering the number of offer/product elements per page
  * and the standard deviation of their textual description.
  */
-public class DetectListingsAds extends Processor<ArrayList<OutputOffer>>{
+public class DetectListingsAds extends Processor<File>{
 	
-	private File offersFile = new File("C:\\Users\\User\\workspace\\TransferLearningDataCreator\\src\\main\\resources\\tmp\\offers");
+	@Parameter(names = { "-out",
+	"-outputDir" }, required = true, description = "Folder where the outputfile(s) are written to.", converter = FileConverter.class)
+	private File outputDirectory ; 
+	
+	@Parameter(names = { "-in",
+		"-inputDir" }, required = true, description = "Folder where the input is read from.", converter = FileConverter.class)
+	private File inputDirectory;
+	
+	@Parameter(names = "-threads", required = true, description = "Number of threads.")
+	private Integer threads;
+	
 	private int maxOffersPerUrl = 3;
-	private double maxStdDevForListingPages = 0.2;
-	private File outputClean = new File("C:\\Users\\User\\workspace\\TransferLearningDataCreator\\src\\main\\resources\\tmp\\offers_clean.txt");
-	private File outputListings = new File("C:\\Users\\User\\workspace\\TransferLearningDataCreator\\src\\main\\resources\\tmp\\offers_listings");
-	private int threads = 1;
+	private double maxStdDevForListingPages = 0.5;
+	private double minSimilarity = 0.8;
 	
-	private HashSet<OutputOffer> listingsorAddsOffers = new HashSet<OutputOffer>();
-	private HashSet<OutputOffer> globalCleanOffers = new HashSet<OutputOffer>();
-	private HashSet<OutputOffer> offers = new HashSet<OutputOffer>();
+	public boolean negatives = true;
 	
+	long listingPageCount = (long)0.0;
+	long entityListingPageCount = (long)0.0;
+	long validEntitiesCount = (long)0.0;
+	
+	public static void main(String args[]) {
+		
+	}
+	
+	@Override
+	protected List<File> fillListToProcess() {
+		List<File> files = new ArrayList<File>();
+		for (File f : inputDirectory.listFiles()) {
+			if (!f.isDirectory()) {
+				files.add(f);
+			}
+		}
+		return files;
+	}
 	
 	@Override
 	protected int getNumberOfThreads() {
 		return this.threads;
 	}
-	
+
 	@Override
-	protected List<ArrayList<OutputOffer>> fillListToProcess() {
+	protected void process(File object) throws Exception {	
+		String fileName = object.getName().substring(0, object.getName().length()-4); // removes .txt
+		BufferedReader br = InputUtil.getBufferedReader(object);
 		
-		List<ArrayList<OutputOffer>> outputOffersPerURL = new ArrayList<ArrayList<OutputOffer>>();
+		ArrayList<Entity> entities = new ArrayList<Entity>();
+		ArrayList<Entity> validEntities = new ArrayList<Entity>();
+		ArrayList<Entity> invalidEntities = new ArrayList<Entity>();
 		
-		//import the data 
-		DataImporter importOffers = new DataImporter(offersFile);
-		offers = importOffers.importOffers();
+		String line;
+		String currentUrl = "";
 		
-		System.out.printf("Loaded %d offers.\n",offers.size());
-		
-		//group offers by url
-		HashMap<String,List<OutputOffer>> offersByURL = (HashMap<String, List<OutputOffer>>) offers.stream().collect(Collectors.groupingBy(o -> o.getUrl()));
-		
-		System.out.println("Total number of urls: "+offersByURL.size());
-		
-		HashMap<String,List<OutputOffer>> offersByListingUls = new HashMap<>();
-		for (Map.Entry<String, List<OutputOffer>> offersOfURL : offersByURL.entrySet()) {
-			if (offersOfURL.getValue().size()>=maxOffersPerUrl) offersByListingUls.put(offersOfURL.getKey(), offersOfURL.getValue());
-			else {
-				//even if we dont have lots of offers per url we should ignore the similar or relate offers
-				for (OutputOffer o:offersOfURL.getValue()) {
-					if (o.getPropertyToParent().toLowerCase().contains("isrelatedto")||o.getPropertyToParent().toLowerCase().contains("issimilarto")) this.listingsorAddsOffers.add(o);
-					this.globalCleanOffers.add(o);
+		long entityListingPageCount = (long)0.0;
+		long listingPageCount = (long)0.0;
+
+		while ((line = br.readLine()) != null) {	
+			Entity e = EntityStatic.parseEntity(line);
+			
+			if (e.url.equals(currentUrl)) { // the identifier value
+			    entities.add(e);
+			} else {
+				if(entities.size() > 0) {
+					if(isListingPage(entities)) { // check if entities belong to a listing page
+						entityListingPageCount += entities.size();
+						listingPageCount++;
+						
+//						if(negatives)
+//						invalidEntities.addAll(entities);
+					}
+					else {
+						validEntities.addAll(entities);
+					}
 				}
-				
+				//write once in a while in file so that we don't keep everything in memory
+				if (validEntities.size()>100000) {
+					CustomFileWriter.writeEntitiesToFile(fileName, outputDirectory, "listAds", validEntities);
+					updateValidEntitiesCount(validEntities.size());
+					validEntities.clear();
+				}
+				entities.clear();
+				entities.add(e);
+				currentUrl = e.url;
 			}
 		}
-		
-		System.out.printf("Urls with more than %d offers : %d \n", maxOffersPerUrl, offersByListingUls.size());
-		
-		// we dont need that big object anymore
-		offersByURL.clear();		
-		
-		for (Map.Entry<String, List<OutputOffer>> urlWOffers : offersByListingUls.entrySet()) {
-			outputOffersPerURL.add((ArrayList<OutputOffer>) urlWOffers.getValue());
+		// process once more for last quads
+		if(isListingPage(entities)) { // check if entities belong to a listing page
+			entityListingPageCount += entities.size();
+			listingPageCount++;
+//			if(negatives)
+//			invalidEntities.addAll(entities);
 		}
-	
-		return outputOffersPerURL;
-	}
-	
-	@Override
-	protected void process(ArrayList<OutputOffer> offers) throws Exception {
-		
-		List<OutputOffer> localListingsOrAds = new ArrayList<>();
-		List<OutputOffer> localCleanOffers = new ArrayList<>(offers);
-		
-		
-		List<OutputOffer> listingsOrAds = detectListingsOrAdsOfURL(offers);
-		localListingsOrAds.addAll(listingsOrAds);
-		localCleanOffers.removeAll(localListingsOrAds);
-		
-		integrateLocalListingsOrAds(localListingsOrAds);
-		integrateLocalCleanOffers(localCleanOffers);
-	}
-	
-	
-	
-	
-	private synchronized void integrateLocalCleanOffers(List<OutputOffer> localCleanOffers) {
-		this.globalCleanOffers.addAll(localCleanOffers);
+		else {
+			validEntities.addAll(entities);
+		}
+		updateListingPageCount(listingPageCount);
+		updateEntityListingPageCount(entityListingPageCount);
+		updateValidEntitiesCount(validEntities.size());
+		CustomFileWriter.writeEntitiesToFile(fileName, outputDirectory, "listAds", validEntities);
+//		if(negatives)
+//		CustomFileWriter.writeEntitiesToFile("negatives", outputDirectory, "", invalidEntities);
 		
 	}
-
-	private synchronized void integrateLocalListingsOrAds(List<OutputOffer> localListingsOrAds) {
-		this.listingsorAddsOffers.addAll(localListingsOrAds);
-
+	
+	// sync error count with global error count
+	private synchronized void updateListingPageCount(long count) {
+		this.listingPageCount += count;
+	}
+	
+	// sync error count with global error count
+	private synchronized void updateEntityListingPageCount(long count) {
+		this.entityListingPageCount += count;
+	}
+	
+	// sync error count with global error count
+	private synchronized void updateValidEntitiesCount(long count) {
+		this.validEntitiesCount += count;
 	}
 	
 	@Override
 	protected void afterProcess() {
+		System.out.println("Valid Entities: " + validEntitiesCount);
+		System.out.println("Listing Page Entities: " + entityListingPageCount);
+		System.out.println("Listing Pages: " + listingPageCount);
+	}
+	
+	
+	public boolean isListingPage(ArrayList<Entity> entities) {
+		if(entities.get(0).itemPage == true) {
+			return false;
+		}
+		if(entities.size() >= maxOffersPerUrl) { // if the number of entities is bigger => potential listing page candidate			
+			String price = entities.get(0).price; // price of the first entity of a page
+			boolean samePrice = true;
+			for(Entity e : entities) {
+				if(e.isVariation == true) { // when subids is set there is product variations and not a listing page
+					return false;
+				}
+				if(e.price == null || (e.price != null && (!e.price.equals(price) || StringUtils.containsOnlyZeros(e.price)))) {
+					samePrice = false;
+				}
+			}
+			if(samePrice) { // if same price across all entities on a webpage likely no listing page
+				return false;
+			}	
+			return true;
+		}
+		
+		return false;
+	}
+	
+	/**
+	 * Attention: <br>
+	 * This filter is only good for urls that have more than 3 entities
+	 * 
+	 * This method checks if a url is potentially a listing page. Two main assumptions:
+	 * 1.) If the url contains to many url params its a listing page
+	 * 2.) if the url has only one path paramter its also likely to be listing pagey<br>
+	 * 
+	 * 
+	 * 
+	 * @param url
+	 * @return true if the url is likely to be listing page
+	 */
+	public static boolean checkUrlForListing(String url) {
+		if(toManyUrlParamters(url)) {
+			return true;
+		}
+		if(toShortResource(url)) {
+			return true;
+		}
+		return false;
+	}
+	
+	/**
+	 * Checks if the entities could potentially have one main product and the others are variations
+	 * @param entities
+	 * @return
+	 */
+	private boolean checkForMainProduct(ArrayList<Entity> entities) {
+		return false;
+	}
+	
+	private static boolean toShortResource(String url_) {
 		try {
-			System.out.println("Listing or ad offers detected: "+this.listingsorAddsOffers.size());
-			System.out.println("Clean offers: "+this.globalCleanOffers.size());
-			
-			System.out.println("Write clean offers");
-			writeOffers(this.globalCleanOffers,outputClean);
-			System.out.println("Write listing offers");
-			writeOffers(this.listingsorAddsOffers, outputListings);
-		}
-		catch(Exception e) {
-			System.out.println(e.getMessage());
-		}
-		
+			URL url = new URL(url_);
+			String path = url.getPath();
+			int count = path.length() - path.replace("/", "").length();
+			if(count <= 1) { // example.com/myproduct.html is very likely to not be single product
+				return true;
+			}
+		} catch (MalformedURLException e) {}
+		return false;
 	}
-
-	public void detectListingsAds() throws IOException {
-		
-		//import the data
-		DataImporter importOffers = new DataImporter(offersFile);
-		HashSet<OutputOffer> offers = importOffers.importOffers();
-		
-		System.out.printf("Loaded %d offers.\n",offers.size());
-		
-		//group offers by url
-		HashMap<String,List<OutputOffer>> offersByURL = (HashMap<String, List<OutputOffer>>) offers.stream().collect(Collectors.groupingBy(o -> o.getUrl()));
-		
-		System.out.println("Total number of urls: "+offersByURL.size());
-		
-		HashMap<String,List<OutputOffer>> offersByListingUls = new HashMap<>();
-		for (Map.Entry<String, List<OutputOffer>> offersOfURL : offersByURL.entrySet()) {
-			if (offersOfURL.getValue().size()>maxOffersPerUrl) offersByListingUls.put(offersOfURL.getKey(), offersOfURL.getValue());
-		}
-		
-		System.out.printf("Urls with more than %d offers : %d \n", maxOffersPerUrl, offersByListingUls.size());
-		
-		// we dont need that big object anymore
-		offersByURL.clear();
-		HashSet<OutputOffer> listingsOrAdsTotal = new HashSet<>();
-		
-		int urlCount =0;
-		
-		for (Map.Entry<String, List<OutputOffer>> urlWOffers : offersByListingUls.entrySet()) {
-			urlCount++;
-			
-			if (urlCount%10==0) System.out.println("Parsed "+urlCount+" urls.");
-			
-			List<OutputOffer> listingsOrAds = detectListingsOrAdsOfURL(urlWOffers.getValue());
-			listingsOrAdsTotal.addAll(listingsOrAds);
-			
-			offers.removeAll(listingsOrAds);
-		}
-		
-		System.out.printf("Found %d listing or ad items. \n",listingsOrAdsTotal.size());
-		writeOffers(globalCleanOffers,outputClean);
-		writeOffers(listingsOrAdsTotal, outputListings);
-	}
-
-	private void writeOffers(HashSet<OutputOffer> offers, File file) throws IOException {
-		
-		BufferedWriter writer = new BufferedWriter(new FileWriter(file));
-		for (OutputOffer offer:offers) {
-			writer.write(offer.toJSONObject(true)+"\n");
-		}
-		writer.flush();
-		writer.close();
-		
-	}
-
-	private List<OutputOffer> detectListingsOrAdsOfURL(List<OutputOffer> offers) {
-		
-		StDevStats stats = new StDevStats();
-		
-		List<OutputOffer> listingOrAdoffers = new ArrayList<OutputOffer>();
-		
-		//calculate the stddev of the descriptive length of every entity
-		double[] counts = new double[offers.size()];
-        int count = 0;
-        for(OutputOffer offer : offers){
-            counts[count] = (offer.getDescriptivePropertiesAsOneString().length());
-            count++;
-        }
-        
-        double stdDev = stats.getStdDev(counts);
-       
-        
-        double median = stats.getMedian(counts);
-
-        
-        //if the standard deviation of the length of the offers of one url is minimal then it is probably a listing page
-        if (stdDev<maxStdDevForListingPages*median) listingOrAdoffers = offers;
-
-        //if not many items might be ads. Figure this out by considering the relation to the parent element
-        else {
-        	HashMap<String,List<OutputOffer>> offersByparentItemRelation = (HashMap<String, List<OutputOffer>>) offers.stream().collect(Collectors.groupingBy(o -> o.getPropertyToParent()));
-        
-           
-        	double[] relationCounts = new double[offersByparentItemRelation.size()];
-        	count = 0 ;
-        	for (Map.Entry<String, List<OutputOffer>> relationOffers : offersByparentItemRelation.entrySet()) {
-        		relationCounts[count] = relationOffers.getValue().size();
-        		count++; 
-        		
-        	} 
-        	double medianRelationCounts = stats.getMedian(relationCounts);
-        
-        	for (Map.Entry<String, List<OutputOffer>> relationOffers : offersByparentItemRelation.entrySet()) {
-        		//if there are many offers connected to their parent element with the same property
-        		if(relationOffers.getValue().size() > medianRelationCounts) listingOrAdoffers.addAll(relationOffers.getValue());
-        		else if (relationOffers.getKey().toLowerCase().contains("isrelatedto")||relationOffers.getKey().toLowerCase().contains("issimilarto")) listingOrAdoffers.addAll(relationOffers.getValue());
-        	} 
-        }
 	
-		return listingOrAdoffers;
+	private static boolean toManyUrlParamters(String url) {
+		int number = 0;
+		try {
+			number = splitQuery(new URL(url)).size();
+		} catch (Exception e) {}
+		if(number > 2) { // if 3 or more url params
+			//PrintUtils.p(number + "   " + entitiesAmount + "   " + url);
+			return true;
+		}
+		
+		return false;
+	}
+	
+	/**
+	 * Gets all Url parameters
+	 * @param url
+	 * @return
+	 * @throws UnsupportedEncodingException
+	 */
+	public static Map<String, String> splitQuery(URL url) throws Exception {
+	    Map<String, String> query_pairs = new LinkedHashMap<String, String>();
+	    String query = url.getQuery();
+	    String[] pairs = query.split("&");
+	    for (String pair : pairs) {
+	        int idx = pair.indexOf("=");
+	        query_pairs.put(URLDecoder.decode(pair.substring(0, idx), "UTF-8"), URLDecoder.decode(pair.substring(idx + 1), "UTF-8"));
+	    }
+	    return query_pairs;
+	}
+	
+	private int getUrlParamAmount(String url) {
+		int amount = 0;
+		try {
+			amount = splitQuery(new URL(url)).size();
+		} catch (Exception e) {}
+		return amount;
 	}
 	
 	
-    public static void main(String args[]) throws IOException {
-    	
-    	DetectListingsAds detect = new DetectListingsAds();
-    	
-    	if(args.length>0) {
-    		detect.offersFile = new File(args[0]);
-    		detect.maxOffersPerUrl = Integer.valueOf(args[1]);
-    		detect.maxStdDevForListingPages = Double.valueOf(args[2]);
-    		detect.outputClean = new File(args[3]);
-    		detect.outputListings = new File(args[4]);
-    		detect.threads = Integer.valueOf(args[5]);
-    		
-    	}
-    	
-    	//detect.detectListingsAds();
-    	detect.process();
-    	
-    }
+	
+	
+	
+	
 }

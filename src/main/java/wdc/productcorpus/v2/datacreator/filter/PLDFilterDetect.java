@@ -1,4 +1,4 @@
-package wdc.productcorpus.datacreator.Filter;
+package wdc.productcorpus.v2.datacreator.filter;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -13,17 +13,24 @@ import org.json.JSONObject;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.converters.FileConverter;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import de.dwslab.dwslib.framework.Processor;
 import wdc.productcorpus.datacreator.OutputFilesCreator.DataImporter;
 import wdc.productcorpus.util.DomainUtil;
 import wdc.productcorpus.util.InputUtil;
+import wdc.productcorpus.v2.model.Entity;
+import wdc.productcorpus.v2.model.EntityStatic;
 
 /**
- * @author Anna Primpeli
- * Filters the offers that come from PLDs which erroneously allocate the same identifier to all their offers.
+ * @author Marc Becker
+ * 
+ * Groups all entities of one PLD together and applies the following operations:
+ * 
+ * 1.) Bad PLD Detect
+ * 
  */
-public class BadPLDsDetect extends Processor<File> {
+public class PLDFilterDetect extends Processor<File> {
 
 	@Parameter(names = { "-out",
 	"-outputDir" }, required = false, description = "Folder where the outputfile(s) are written to.", converter = FileConverter.class)
@@ -38,7 +45,7 @@ public class BadPLDsDetect extends Processor<File> {
 	
 	public static void main(String args[]) {
 		
-		BadPLDsDetect detect = new BadPLDsDetect();
+		PLDFilterDetect detect = new PLDFilterDetect();
 		if (args.length>0) {
 			detect.inputDirectory = new File (args[0]);
 			detect.outputDirectory = new File(args[1]);
@@ -71,8 +78,6 @@ public class BadPLDsDetect extends Processor<File> {
 	@Override
 	protected void process(File object) throws Exception {
 		
-		DataImporter importData = new DataImporter();
-		
 		BufferedReader br = InputUtil.getBufferedReader(object);
 		
 		HashMap<String,Integer> valuesPerDomain = new HashMap<String,Integer>();
@@ -82,41 +87,37 @@ public class BadPLDsDetect extends Processor<File> {
 
 		while ((line = br.readLine()) != null) {
 			
-			//String []lineParts= line.split("\\t");
+			Entity e = EntityStatic.parseEntity(line);
+			String domain = DomainUtil.getPayLevelDomainFromWholeURL(e.url);
 			
-			//String idValue =lineParts[4];			
-			//String domain = DomainUtil.getPayLevelDomainFromWholeURL(lineParts[2]);
-			
-			JSONObject json = new JSONObject(line);
-			String url = json.getString("url"); 
-			String domain = DomainUtil.getPayLevelDomainFromWholeURL(url);
-			
-			JSONArray identifiers = (JSONArray) json.get("identifiers");
-			HashMap<String, HashSet<String>> identifier_values = importData.getValuesFromJSONArray(identifiers, true);
-			
-			for (HashSet<String> values: identifier_values.values()) {
-				for (String idValue: values){
-					//increase the general counter
-					Integer currentGenCounter = valuesPerDomain.get(domain);
-					if (null == currentGenCounter) currentGenCounter=0;
-					currentGenCounter++;
-					valuesPerDomain.put(domain, currentGenCounter);
-					
-					//increase the value specific counter
-					HashMap<String,Integer> valuesOfDomain = frequencyOfValuesPerDomain.get(domain);
-					if (null == valuesOfDomain) valuesOfDomain = new HashMap<String,Integer>();
-					Integer valueFrequency = valuesOfDomain.get(idValue);
-					if (null == valueFrequency) valueFrequency =0;
-					valueFrequency++;
-					valuesOfDomain.put(idValue, valueFrequency);
-					frequencyOfValuesPerDomain.put(domain, valuesOfDomain);
-					
-				}
+			for(String idValue: EntityStatic.getIdentifiers(e)) {
+				
+				//increase the general counter
+				Integer currentGenCounter = valuesPerDomain.get(domain);
+				if (null == currentGenCounter) currentGenCounter=0;
+				currentGenCounter++;
+				valuesPerDomain.put(domain, currentGenCounter);
+				
+				//increase the value specific counter
+				HashMap<String,Integer> valuesOfDomain = frequencyOfValuesPerDomain.get(domain);
+				if (null == valuesOfDomain) valuesOfDomain = new HashMap<String,Integer>();
+				Integer valueFrequency = valuesOfDomain.get(idValue);
+				if (null == valueFrequency) valueFrequency =0;
+				valueFrequency++;
+				valuesOfDomain.put(idValue, valueFrequency);
+				frequencyOfValuesPerDomain.put(domain, valuesOfDomain);	
 				
 			}
 			
+			if(valuesPerDomain.size() > 10000) {
+				integrateValuesPerDomain(valuesPerDomain);
+				valuesPerDomain.clear();
+			}
 			
-			
+			if(frequencyOfValuesPerDomain.size() > 10000) {
+				integratefrequencyOfValuesPerDomain(frequencyOfValuesPerDomain);
+				frequencyOfValuesPerDomain.clear();	
+			}
 		}
 		
 		integrateValuesPerDomain(valuesPerDomain);
@@ -185,7 +186,7 @@ public class BadPLDsDetect extends Processor<File> {
 		System.out.println("Found "+erroneousplds.size()+" plds misusing identifier values. Rewrite only clean data.");
 		
 		//now eliminate
-		BadPLDsFilter filter =new BadPLDsFilter(outputDirectory, inputDirectory, threads, erroneousplds);
+		DeleteEntities filter = new DeleteEntities(outputDirectory, inputDirectory, threads, erroneousplds);
 		filter.process();
 	}
 }

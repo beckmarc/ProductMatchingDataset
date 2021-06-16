@@ -23,7 +23,7 @@ import wdc.productcorpus.util.InputUtil;
  * Takes as input the corpus offer and check the possible conflicts of the clustered products.
  * The conflicts derive from offers having part of their identifiers similar while other parts dissimilar.
  * Example: o1: gtin13= a, gtin8= b | o2: gtin8=a , mpn= c | o3: gtin13= d, gtin 8 = c
- * The conflicts are a result of identifiers misuse or oversimplification (assignment to an gtin13 to the productID as the vemdor may not know the difference of the different identifying properties) 
+ * The conflicts are a result of identifi ers misuse or oversimplification (assignment to an gtin13 to the productID as the vemdor may not know the difference of the different identifying properties) 
  * Outputs a file containing all the conflicted product offers
  */
 public class ClusterConflictProfiler extends Processor<File> {

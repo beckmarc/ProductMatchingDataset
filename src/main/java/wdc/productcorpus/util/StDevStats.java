@@ -1,5 +1,6 @@
 package wdc.productcorpus.util;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 
 public class StDevStats {
@@ -36,5 +37,17 @@ public class StDevStats {
     {
         return Math.sqrt(getVariance(counts));
     }
-
+    
+    public double getVC(double[] counts) {
+    	return getStdDev(counts) / getMean(counts);
+    }
+    
+    public double[] toPrimDouble(ArrayList<Double> counts) {
+    	double[] primitive = new double[counts.size()];
+    	for(int i=0; i<counts.size(); i++) {
+    		primitive[i] = counts.get(i);
+    	}
+    	return primitive;
+    }
+    
 }
